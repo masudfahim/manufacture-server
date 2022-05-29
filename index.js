@@ -2,7 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 
 
@@ -40,8 +41,33 @@ async function run() {
         await client.connect();
         const serviceCollection = client.db('assignment-12').collection('services');
         const bookingCollection = client.db('assignment-12').collection('bookings');
+        const profileCollection = client.db('assignment-12').collection('profile');
+        const reviewCollection = client.db('assignment-12').collection('review');
 
         const userCollection = client.db('assignment-12').collection('users');
+
+        const paymentCollection = client.db('assignment-12').collection('payments');
+
+
+
+        app.post('/create-payment-intent', verifyJWT, async (req, res) => {
+            const service = req.body;
+            const price = service.price;
+            const amount = price * 100;
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: amount,
+                currency: 'usd',
+                payment_method_types: ['card']
+            });
+            res.send({ clientSecret: paymentIntent.client_secret })
+        });
+
+
+        app.post('/service', async (req, res) => {
+            const newService = req.body;
+            const result = await serviceCollection.insertOne(newService);
+            res.send(result);
+        });
 
 
         app.get('/service', async (req, res) => {
@@ -50,6 +76,13 @@ async function run() {
             const services = await cursor.toArray();
             res.send(services);
         });
+        app.get('/review', async (req, res) => {
+            const query = {};
+            const cursor = reviewCollection.find(query);
+            const reviews = await cursor.toArray();
+            res.send(reviews);
+        });
+
         app.post('/booking', async (req, res) => {
             const booking = req.body;
             const result = await bookingCollection.insertOne(booking);
@@ -57,14 +90,50 @@ async function run() {
 
             return res.send({ success: true, result });
         });
-        // app.get('/booking', async (req, res) => {
-        //     const email = req.query.email;
-        //     const query = { email: email };
-        //     const bookings = await bookingCollection.find(query).toArray();
-        //     return res.send(bookings);
-        // }
 
-        // );
+
+        app.post('/profile', async (req, res) => {
+            const booking = req.body;
+            const result = await profileCollection.insertOne(booking);
+            console.log('sending email');
+
+            return res.send({ success: true, result });
+        });
+
+
+        app.post('/review', async (req, res) => {
+            const booking = req.body;
+            const result = await reviewCollection.insertOne(booking);
+            console.log('sending email');
+
+            return res.send({ success: true, result });
+        });
+
+
+
+        app.patch('/booking/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id;
+            const payment = req.body;
+            const filter = { _id: ObjectId(id) };
+            const updatedDoc = {
+                $set: {
+                    paid: true,
+                    transactionId: payment.transactionId
+                }
+            }
+
+            const result = await paymentCollection.insertOne(payment);
+            const updatedBooking = await bookingCollection.updateOne(filter, updatedDoc);
+            res.send(updatedBooking);
+        })
+
+
+        app.get('/booking/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: ObjectId(id) };
+            const booking = await bookingCollection.findOne(query);
+            res.send(booking);
+        })
         app.get('/booking', verifyJWT, async (req, res) => {
             const email = req.query.email;
             const decodedEmail = req.decoded.email;
